@@ -16,7 +16,7 @@
 *
 *  Date: 2018-07-04
 *
-*	Updates by Barry A. Burke (storageanarchy@gmail.com)
+*	Updates by Barry A. Burke (storageanarchy@gmail.com), Eric Cheng
 *	Date: 2017 - 2018
 *
 *	1.0.00 - Initial Release
@@ -42,12 +42,13 @@
 *	1.1.06 - Optimized temp/humidity/pressure updates
 *	1.1.07 - Fixed Flagged sensors, added Hidden device support (needs owners's Key)
 *	1.1.08 - Added reference adjustments for Temp, Humidity & Pressure
+*   1.2.00 - (Eric Cheng) Added to EPA adjustment to aqi10
 *
 */
 import groovy.json.JsonSlurper
 import java.math.BigDecimal
 
-def getVersionNum() { return "1.1.08" }
+def getVersionNum() { return "1.2.00" }
 private def getVersionLabel() { return "PurpleAir Air Quality Station, version ${getVersionNum()}" }
 
 
@@ -83,7 +84,7 @@ private Boolean getIsHEHub() { (state.isHE) }					// if (isHEHub) ...
 // **************************************************************************************************************************
 
 metadata {
-    definition (name: "PurpleAir Air Quality Station", namespace: "sandood", author: "sandood",
+    definition (name: "PurpleAir Air Quality Station EC mod", namespace: "sandood", author: "sandood-ec",
 			    importUrl: "https://raw.githubusercontent.com/SANdood/PurpleAirStation/master/devicetypes/sandood/purpleair-air-quality-station.src/purpleair-air-quality-station.groovy") {
         capability "Temperature Measurement"
         capability "Relative Humidity Measurement"
@@ -100,6 +101,7 @@ metadata {
         attribute "aqi", "number"				// current AQI
 		attribute "aqiDisplay", 'string'
 		attribute "aqi10", "number"				// 10 minute average
+		attribute "aqi10epa", "number"				// 10 minute average, EPA corrected
 		attribute "aqi30", "number"				// 30 minute average
 		attribute "aqi1", "number"				// 1 hour average
 		attribute "aqi6", "number"				// 6 hour average
@@ -157,6 +159,10 @@ metadata {
         }
 		valueTile('aqi10', 'device.aqi10', inactiveLabel: false, width: 1, height: 1, decoration: 'flat', wordWrap: true) {
         	state 'default', label: 'AQI\n${currentValue}',
+            	backgroundColors: (aqiColors)
+        }
+		valueTile('aqi10epa', 'device.aqi10epa', inactiveLabel: false, width: 1, height: 1, decoration: 'flat', wordWrap: true) {
+        	state 'default', label: 'EPA AQI\n${currentValue}',
             	backgroundColors: (aqiColors)
         }
 		valueTile('aqi30', 'device.aqi30', inactiveLabel: false, width: 1, height: 1, decoration: 'flat', wordWrap: true) {
@@ -239,7 +245,7 @@ metadata {
        //main(["aqiDisplay"])
         main(['airQualityIndex'])
         details([	"airQualityIndex",
-					'aqi10', 'aqi30', 'aqi1', 'aqi6', 'aqi24', 'aqi7',
+					'aqi10', 'aqi10epa', 'aqi30', 'aqi1', 'aqi6', 'aqi24', 'aqi7',
 					'pm10', 'pm30', 'pm1', 'pm6', 'pm24', 'pm7',
 					'updated', 'locationTile', 
 					'temperature', 'humidity', 'pressure', 'rssi', 'ID', 'caqi', 
@@ -553,59 +559,6 @@ def parsePurpleAir(response) {
         oldData = "ERROR: Station ${purpleID} has no trusted sensor reports"
     }
 
-    if (single >= 0) {
-        def aqi   = roundIt(pm_to_aqi(pm), 0)
-        //if (aqi < 1.0) aqi = roundIt(aqi,0)		// to avoid displaying ".4" when it should display "0.4"
-        
-        
-        def aqi10 = roundIt(pm_to_aqi(pm10), 0)
-        def aqi30 = roundIt(pm_to_aqi(pm30), 0)
-        def aqi1  = roundIt(pm_to_aqi(pm1), 0)
-        def aqi6  = roundIt(pm_to_aqi(pm6), 0)
-        def aqi24 = roundIt(pm_to_aqi(pm24), 0)
-        def aqi7  = roundIt(pm_to_aqi(pm7), 0)
-
-        sendEvent(name: 'airQualityIndex', 	value: aqi, displayed: false)
-        
-        def caqi = roundIt(pm_to_caqi(pm1), 0)	// CAQI is based off of hourly data
-        // sendEvent(name: "CAQI", value: caqi, unit: "CAQI", displayed: true)
-		// sendEvent(name: "caqi", value: caqi, unit: "CAQI", displayed: true)
-        sendEvent(name: "airQuality", value: caqi, unit: "CAQI", displayed: true, descriptionText: "The Common Air Quality Index for the hour is ${caqi} CAQI")
-
-        String p25 = roundIt(pm,1) + ' µg/m³'
-        String cond = '??'
-        if (oldData == '') {
-            if 		(aqi < 51)  {sendEvent(name: 'message', value: " GOOD: little to no health risk\n (${p25})", descriptionText: 'AQI is GOOD - little to no health risk'); cond = 'GOOD';}
-            else if (aqi < 101) {sendEvent(name: 'message', value: " MODERATE: slight risk for some people\n (${p25})", descriptionText: 'AQI is MODERATE - slight risk for some people'); cond = 'MODERATE';}
-            else if (aqi < 151) {sendEvent(name: 'message', value: " UNHEALTHY for sensitive groups\n (${p25})", descriptionText: 'AQI is UNHEALTHY for Sensitive Groups'); cond = 'UNHEALTHY';}
-            else if (aqi < 201) {sendEvent(name: 'message', value: " UNHEALTHY for most people\n (${p25})", descriptionText: 'AQI is UNHEALTHY for most people'); cond = '*UNHEALTHY*';}
-            else if (aqi < 301) {sendEvent(name: 'message', value: " VERY UNHEALTHY: serious effects for everyone (${p25})", descriptionText: 'AQI is VERY UNHEALTHY - serious effects for everyone'); cond = 'VERY UNHEALTHY';}
-            else 				{sendEvent(name: 'message', value: " HAZARDOUS: emergency conditions for everyone (${p25})", descriptionText: 'AQI is HAZARDOUS - emergency conditions for everyone'); cond = 'HAZARDOUS';}
-        } else {
-            sendEvent(name: 'message', value: oldData, descriptionText: "No updates for ${roundIt((age/60000),2)} minutes")
-            log.error "No updates for ${roundIt((age/60000),2)} minutes"
-        }
-		log.info("AQI: ${aqi}")
-        
-        sendEvent(name: 'aqi', 	 value: aqi,   descriptionText: "AQI real time is ${aqi}")
-        sendEvent(name: 'aqiDisplay', value: "${aqi}\n${cond}", displayed: false)
-        sendEvent(name: 'aqi10', value: aqi10, descriptionText: "AQI 10 minute average is ${aqi10}")
-        sendEvent(name: 'aqi30', value: aqi30, descriptionText: "AQI 30 minute average is ${aqi30}")
-        sendEvent(name: 'aqi1',  value: aqi1,  descriptionText: "AQI 1 hour average is ${aqi1}")
-        sendEvent(name: 'aqi6',  value: aqi6,  descriptionText: "AQI 6 hour average is ${aqi6}")
-        sendEvent(name: 'aqi24', value: aqi24, descriptionText: "AQI 24 hour average is ${aqi24}")
-        sendEvent(name: 'aqi7',  value: aqi7,  descriptionText: "AQI 7 day average is ${aqi7}")
-
-        sendEvent(name: 'pm',   value: pm,   unit: 'µg/m³', descriptionText: "PM2.5 real time is ${pm}µg/m³")
-        sendEvent(name: 'pm10', value: pm10, unit: 'µg/m³', descriptionText: "PM2.5 10 minute average is ${pm10}µg/m³")
-        sendEvent(name: 'pm30', value: pm30, unit: 'µg/m³', descriptionText: "PM2.5 30 minute average is ${pm30}µg/m³")
-        sendEvent(name: 'pm1',  value: pm1,  unit: 'µg/m³', descriptionText: "PM2.5 1 hour average is ${pm1}µg/m³")
-        sendEvent(name: 'pm6',  value: pm6,  unit: 'µg/m³', descriptionText: "PM2.5 6 hour average is ${pm6}µg/m³")
-        sendEvent(name: 'pm24', value: pm24, unit: 'µg/m³', descriptionText: "PM2.5 24 hour average is ${pm24}µg/m³")
-        sendEvent(name: 'pm7',  value: pm7,  unit: 'µg/m³', descriptionText: "PM2.5 7 day average is ${pm7}µg/m³")
-    } else {
-    	sendEvent(name: 'message', value: oldData) // ERROR
-    }
 
     def temperature
     def humidity
@@ -716,6 +669,63 @@ def parsePurpleAir(response) {
         sendEvent(name: 'pressure', value: pressure, unit: 'inHg', displayed: false)
         sendEvent(name: 'pressureDisplay', value: pressure+'\ninHg', unit: '', descriptionText: "Barometric Pressure is ${pressure}inHg" )
     }
+
+    if (single >= 0) {
+        def aqi   = roundIt(pm_to_aqi(pm), 0)
+        //if (aqi < 1.0) aqi = roundIt(aqi,0)		// to avoid displaying ".4" when it should display "0.4"
+        
+        
+        def aqi10 = roundIt(pm_to_aqi(pm10), 0)
+        // def aqi10epa = roundIt(pm_to_aqi(pm10), 0)
+        def aqi10epa = roundIt(pm_to_aqi(pm_to_epapm(pm10,humidity)), 0)
+        def aqi30 = roundIt(pm_to_aqi(pm30), 0)
+        def aqi1  = roundIt(pm_to_aqi(pm1), 0)
+        def aqi6  = roundIt(pm_to_aqi(pm6), 0)
+        def aqi24 = roundIt(pm_to_aqi(pm24), 0)
+        def aqi7  = roundIt(pm_to_aqi(pm7), 0)
+
+        sendEvent(name: 'airQualityIndex', 	value: aqi, displayed: false)
+        
+        def caqi = roundIt(pm_to_caqi(pm1), 0)	// CAQI is based off of hourly data
+        // sendEvent(name: "CAQI", value: caqi, unit: "CAQI", displayed: true)
+		// sendEvent(name: "caqi", value: caqi, unit: "CAQI", displayed: true)
+        sendEvent(name: "airQuality", value: caqi, unit: "CAQI", displayed: true, descriptionText: "The Common Air Quality Index for the hour is ${caqi} CAQI")
+
+        String p25 = roundIt(pm,1) + ' µg/m³'
+        String cond = '??'
+        if (oldData == '') {
+            if 		(aqi < 51)  {sendEvent(name: 'message', value: " GOOD: little to no health risk\n (${p25})", descriptionText: 'AQI is GOOD - little to no health risk'); cond = 'GOOD';}
+            else if (aqi < 101) {sendEvent(name: 'message', value: " MODERATE: slight risk for some people\n (${p25})", descriptionText: 'AQI is MODERATE - slight risk for some people'); cond = 'MODERATE';}
+            else if (aqi < 151) {sendEvent(name: 'message', value: " UNHEALTHY for sensitive groups\n (${p25})", descriptionText: 'AQI is UNHEALTHY for Sensitive Groups'); cond = 'UNHEALTHY';}
+            else if (aqi < 201) {sendEvent(name: 'message', value: " UNHEALTHY for most people\n (${p25})", descriptionText: 'AQI is UNHEALTHY for most people'); cond = '*UNHEALTHY*';}
+            else if (aqi < 301) {sendEvent(name: 'message', value: " VERY UNHEALTHY: serious effects for everyone (${p25})", descriptionText: 'AQI is VERY UNHEALTHY - serious effects for everyone'); cond = 'VERY UNHEALTHY';}
+            else 				{sendEvent(name: 'message', value: " HAZARDOUS: emergency conditions for everyone (${p25})", descriptionText: 'AQI is HAZARDOUS - emergency conditions for everyone'); cond = 'HAZARDOUS';}
+        } else {
+            sendEvent(name: 'message', value: oldData, descriptionText: "No updates for ${roundIt((age/60000),2)} minutes")
+            log.error "No updates for ${roundIt((age/60000),2)} minutes"
+        }
+		log.info("AQI: ${aqi}")
+        
+        sendEvent(name: 'aqi', 	 value: aqi,   descriptionText: "AQI real time is ${aqi}")
+        sendEvent(name: 'aqiDisplay', value: "${aqi}\n${cond}", displayed: false)
+        sendEvent(name: 'aqi10', value: aqi10, descriptionText: "AQI 10 minute average is ${aqi10}")
+        sendEvent(name: 'aqi10epa', value: aqi10epa, descriptionText: "AQI EPA 10 minute average is ${aqi10epa}")
+        sendEvent(name: 'aqi30', value: aqi30, descriptionText: "AQI 30 minute average is ${aqi30}")
+        sendEvent(name: 'aqi1',  value: aqi1,  descriptionText: "AQI 1 hour average is ${aqi1}")
+        sendEvent(name: 'aqi6',  value: aqi6,  descriptionText: "AQI 6 hour average is ${aqi6}")
+        sendEvent(name: 'aqi24', value: aqi24, descriptionText: "AQI 24 hour average is ${aqi24}")
+        sendEvent(name: 'aqi7',  value: aqi7,  descriptionText: "AQI 7 day average is ${aqi7}")
+
+        sendEvent(name: 'pm',   value: pm,   unit: 'µg/m³', descriptionText: "PM2.5 real time is ${pm}µg/m³")
+        sendEvent(name: 'pm10', value: pm10, unit: 'µg/m³', descriptionText: "PM2.5 10 minute average is ${pm10}µg/m³")
+        sendEvent(name: 'pm30', value: pm30, unit: 'µg/m³', descriptionText: "PM2.5 30 minute average is ${pm30}µg/m³")
+        sendEvent(name: 'pm1',  value: pm1,  unit: 'µg/m³', descriptionText: "PM2.5 1 hour average is ${pm1}µg/m³")
+        sendEvent(name: 'pm6',  value: pm6,  unit: 'µg/m³', descriptionText: "PM2.5 6 hour average is ${pm6}µg/m³")
+        sendEvent(name: 'pm24', value: pm24, unit: 'µg/m³', descriptionText: "PM2.5 24 hour average is ${pm24}µg/m³")
+        sendEvent(name: 'pm7',  value: pm7,  unit: 'µg/m³', descriptionText: "PM2.5 7 day average is ${pm7}µg/m³")
+    } else {
+    	sendEvent(name: 'message', value: oldData) // ERROR
+    }
     
     def now = new Date(newest).format("h:mm:ss a '\non' M/d/yyyy", location.timeZone).toLowerCase()
     def locLabel = response.results[0]?.Label
@@ -733,6 +743,14 @@ def parsePurpleAir(response) {
     sendEvent(name: 'ID', value: response.results[0]?.ID, descriptionText: "Purple Air Station ID is ${response.results[0]?.ID}")
     sendEvent(name: 'updated', value: now, displayed: false)
     sendEvent(name: 'timestamp', value: newest.toString(), displayed: false)	// Send last
+}
+
+private def pm_to_epapm(pm, humidity) {
+	// adjustment based on EPA recommendations
+	// return Math.max(0, (0.52 * pm) - (0.085 * humidity) + 5.71);
+	def epapm = (0.52 * pm) - (0.085 * humidity) + 5.71;
+	if (epapm < 0) epapm = 0;
+	return epapm;
 }
 
 private def pm_to_aqi(pm) {
